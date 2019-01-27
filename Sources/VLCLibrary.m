@@ -41,6 +41,12 @@ static void HandleMessage(void *,
                           const char *,
                           va_list);
 
+static void HandleMessageForCustomTarget(void *,
+                                         int,
+                                         const libvlc_log_t *,
+                                         const char *,
+                                         va_list);
+
 static VLCLibrary * sharedLibrary = nil;
 
 @interface VLCLibrary()
@@ -185,7 +191,26 @@ static VLCLibrary * sharedLibrary = nil;
 
     if (_logFileStream) {
         libvlc_log_set_file(_instance, _logFileStream);
+        _debugLogging = YES;
     }
+}
+
+- (void)setDebugLoggingTarget:(id<VLCLibraryLogReceiverProtocol>) target
+{
+    if (![target respondsToSelector:@selector(handleMessage:debugLevel:)]) {
+        VKLog(@"%s: target object does not implement required protocol", __func__);
+        return;
+    }
+
+    if (!_instance)
+        return;
+
+    if (_debugLogging) {
+        libvlc_log_unset(_instance);
+    }
+
+    libvlc_log_set(_instance, HandleMessageForCustomTarget, (__bridge void *)(self));
+    _debugLogging = YES;
 }
 
 - (NSString *)version
@@ -252,6 +277,35 @@ static void HandleMessage(void *data,
         return;
 
     VKLog(@"%s", str);
+    free(str);
+    str = NULL;
+}
+
+static void HandleMessageForCustomTarget(void *data,
+                                         int level,
+                                         const libvlc_log_t *ctx,
+                                         const char *fmt,
+                                         va_list args)
+{
+    VLCLibrary *libraryInstance = (__bridge VLCLibrary *)data;
+    id debugLoggingTarget = libraryInstance.debugLoggingTarget;
+
+    if (!debugLoggingTarget)
+        return;
+
+    char *str;
+    if (vasprintf(&str, fmt, args) == -1) {
+        if (str)
+            free(str);
+        str = NULL;
+        return;
+    }
+
+    if (str == NULL)
+        return;
+
+    [debugLoggingTarget handleMessage:[NSString stringWithUTF8String:str] debugLevel:level];
+
     free(str);
     str = NULL;
 }
